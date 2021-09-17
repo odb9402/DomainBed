@@ -48,6 +48,7 @@ if __name__ == "__main__":
         help="For domain adaptation, % of test to use unlabeled for training.")
     parser.add_argument('--skip_model_save', action='store_true')
     parser.add_argument('--save_model_every_checkpoint', action='store_true')
+    parser.add_argument('--device', default='cuda')
     args = parser.parse_args()
 
     # If we ever want to implement checkpointing, just persist these values
@@ -91,7 +92,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.benchmark = False
 
     if torch.cuda.is_available():
-        device = "cuda"
+        device = args.device 
     else:
         device = "cpu"
 
@@ -231,6 +232,10 @@ if __name__ == "__main__":
 
             evals = zip(eval_loader_names, eval_loaders, eval_weights)
             for name, loader, weights in evals:
+                if name == f'env{args.test_envs}_out':
+                    alpha_check = True
+                else:
+                    alpha_check = False
                 acc = misc.accuracy(algorithm, loader, weights, device)
                 results[name+'_acc'] = acc
 

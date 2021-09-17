@@ -10,10 +10,18 @@ import subprocess
 import time
 import torch
 
-def local_launcher(commands):
+def local_launcher(commands, f_prefix='PACS_adapth'):
     """Launch commands serially on the local machine."""
+    i = 0
+    proc_num = 4
+    procs = [None]*proc_num
     for cmd in commands:
-        subprocess.call(cmd, shell=True)
+        procs[i%proc_num] = subprocess.Popen(cmd + f' --device cuda:{i%proc_num} > ./log/{f_prefix}_{i}.log', shell=True)
+        i += 1
+        if (i % proc_num) == 0:
+            for p in procs:
+                if p is not None:
+                    p.wait()            
 
 def dummy_launcher(commands):
     """

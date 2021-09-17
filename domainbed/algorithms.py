@@ -13,6 +13,10 @@ from collections import defaultdict
 from domainbed import networks
 from domainbed.lib.misc import random_pairs_of_minibatches, ParamDict
 
+import sys 
+sys.path.append("..")
+from domainbed.resnets import ResNetDS, resnet_ds18
+
 ALGORITHMS = [
     'ERM',
     'Fish',
@@ -33,7 +37,8 @@ ALGORITHMS = [
     'ANDMask',
     'SANDMask',    # SAND-mask
     'IGA',
-    'SelfReg'
+    'SelfReg',
+    'Adapth'
 ]
 
 def get_algorithm_class(algorithm_name):
@@ -66,6 +71,39 @@ class Algorithm(torch.nn.Module):
 
     def predict(self, x):
         raise NotImplementedError
+
+
+class Adapth(Algorithm):
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(Adapth, self).__init__(input_shape, num_classes, num_domains, hparams)
+        self.hparams = hparams
+        self.network = networks.AdapthNetwork(input_shape, num_classes, self.hparams)
+        self.optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams['weight_decay']
+        )
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        pred_s, pred_d, alpha = self.network(all_x)
+        loss_d = self.hparams['deepnet_coef'] * F.cross_entropy(pred_d, all_y)
+        loss_s = self.hparams['smallnet_coef'] * F.cross_entropy(pred_s, all_y) 
+        loss_total = self.hparams['total_coef'] * F.cross_entropy(alpha*pred_s + (1-alpha)*pred_d, all_y)
+        self.optimizer.zero_grad()
+        (loss_d + loss_s + loss_total).backward()
+        self.optimizer.step()
+
+        return {
+            'loss_s':loss_s.item() * 1/self.hparams['smallnet_coef'],
+            'loss_d':loss_d.item() * 1/self.hparams['deepnet_coef'],
+            'loss_total':loss_d.item() * 1/self.hparams['total_coef'],
+            'alpha': alpha.mean().item()
+        }
+
+    def predict(self, x):
+        return self.network.forward_mean(x)
 
 class ERM(Algorithm):
     """

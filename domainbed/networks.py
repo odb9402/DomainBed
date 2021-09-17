@@ -6,6 +6,9 @@ import torch.nn.functional as F
 import torchvision.models
 
 from domainbed.lib import wide_resnet
+import sys 
+sys.path.append("..")
+from domainbed.resnets import ResNetDS, resnet_ds18, resnet_ds50
 import copy
 
 
@@ -116,6 +119,72 @@ class ResNet(torch.nn.Module):
                 m.eval()
 
 
+class ResNetDepth(torch.nn.Module):
+    """ResNet with the softmax chopped off and the batchnorm frozen"""
+    def __init__(self, input_shape, hparams):
+        super(ResNetDepth, self).__init__()
+        if hparams['resnet18']:
+            print("RESNET 18 Double output")
+            self.network = resnet_ds18()
+            imgnet_pretrained = torchvision.models.resnet18(pretrained=True)
+            self.n_outputs_d = 512
+            self.n_outputs_s = 128
+            self.expansion = 1
+        else:
+            print("RESNET 50 Double output")
+            self.network = resnet_ds50() 
+            imgnet_pretrained = torchvision.models.resnet50(pretrained=True)
+            self.n_outputs_d = 2048 
+            self.n_outputs_s = 512 
+            self.expansion = 4
+
+        dict_params = self.network.state_dict()
+        
+        for name, value in imgnet_pretrained.state_dict().items():
+            try:
+                dict_params[name].data.copy_(value.data)
+                #print(f"Pretrained weight [{name}] is copied")
+            except KeyError:
+                print(f"Adapth network does not contain :[{name}]")
+        self.network.load_state_dict(dict_params)
+        del imgnet_pretrained
+        del dict_params
+
+        # self.network = remove_batch_norm_from_resnet(self.network)
+
+        # adapt number of channels
+        nc = input_shape[0]
+        if nc != 3:
+            tmp = self.network.conv1.weight.data.clone()
+
+            self.network.conv1 = nn.Conv2d(
+                nc, 64, kernel_size=(7, 7),
+                stride=(2, 2), padding=(3, 3), bias=False)
+
+            for i in range(nc):
+                self.network.conv1.weight.data[:, i, :, :] = tmp[:, i % 3, :, :]
+
+        self.freeze_bn()
+        self.hparams = hparams
+        self.dropout = nn.Dropout(hparams['resnet_dropout'])
+
+    def forward(self, x):
+        """Encode x into a feature vector of size n_outputs."""
+        y_s, y_d, alpha = self.network(x)
+        return self.dropout(y_s), self.dropout(y_d), alpha
+
+    def train(self, mode=True):
+        """
+        Override the default train() to freeze the BN parameters
+        """
+        super().train(mode)
+        self.freeze_bn()
+
+    def freeze_bn(self):
+        for m in self.network.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.eval()
+
 class MNIST_CNN(nn.Module):
     """
     Hand-tuned architecture for MNIST.
@@ -195,6 +264,19 @@ def Featurizer(input_shape, hparams):
         raise NotImplementedError
 
 
+def FeaturizerDS(input_shape, hparams):
+    if len(input_shape) == 1:
+        return MLP(input_shape[0], hparams["mlp_width"], hparams)
+    elif input_shape[1:3] == (28, 28):
+        return MNIST_CNN(input_shape)
+    elif input_shape[1:3] == (32, 32):
+        return wide_resnet.Wide_ResNet(input_shape, 16, 2, 0.)
+    elif input_shape[1:3] == (224, 224):
+        return ResNetDepth(input_shape, hparams)
+    else:
+        raise NotImplementedError
+
+
 def Classifier(in_features, out_features, is_nonlinear=False):
     if is_nonlinear:
         return torch.nn.Sequential(
@@ -206,6 +288,69 @@ def Classifier(in_features, out_features, is_nonlinear=False):
     else:
         return torch.nn.Linear(in_features, out_features)
 
+def ClassifierDS(in_features, out_features, is_nonlinear=False):
+    if is_nonlinear:
+        return torch.nn.Sequential(
+            torch.nn.Linear(in_features, in_features // 2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features // 2, in_features // 4),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features // 4, out_features))
+    else:
+        return torch.nn.Linear(in_features, out_features)
+
+
+class AdapthNetwork(nn.Module):
+    """[summary]
+
+    """
+    def __init__(self, input_shape, num_classes, hparams):
+        """[summary]
+
+        Args:
+            input_shape ([type]): [description]
+            num_classes ([type]): [description]
+            hparams ([type]): [description]
+        """
+        super(AdapthNetwork, self).__init__()
+        self.hparams = hparams
+        self.featurizer = FeaturizerDS(input_shape, hparams)
+        self.classifier_d = ClassifierDS(self.featurizer.n_outputs_d, num_classes, self.hparams)
+        self.classifier_s = ClassifierDS(self.featurizer.n_outputs_s, num_classes, self.hparams)
+    
+    def forward(self, x):
+        """Get two outputs from the shallow subnetwork and entire network.
+
+        Args:
+            x ([Tensor]): Mini-batch 
+
+        Returns:
+            ([Prediction from the shallow],[Prediction form the deep]): 
+        """
+        f_1, f_2, alpha = self.featurizer.forward(x)
+        y_2 = self.classifier_d(f_2)
+        y_1 = self.classifier_s(f_1)
+        return y_1, y_2, alpha
+
+    def forward_mean(self, x):
+        """
+        Get an averaged output from the shallow subnetwork and entire network.
+
+        Args:
+            x ([Tensor]): Mini-batch 
+
+        Returns:
+            [Prediction]
+        """
+        y_1, y_2, alpha = self.forward(x)
+        #c = self.get_coefficient(y_1, y_2)
+        return alpha*y_1 + (1-alpha)*y_2
+
+    def get_coefficient(self, y1, y2):
+        prob_1, prob_2 = F.softmax(y1), F.softmax(y2)
+        diff = ((prob_1 - prob_2)**2).sqrt().sum(dim=-1)
+        print(diff)
+        return 0.3 
 
 class WholeFish(nn.Module):
     def __init__(self, input_shape, num_classes, hparams, weights=None):
