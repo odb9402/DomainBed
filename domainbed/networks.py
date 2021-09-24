@@ -135,7 +135,7 @@ class ResNetDepth(torch.nn.Module):
             self.network = resnet_ds50() 
             imgnet_pretrained = torchvision.models.resnet50(pretrained=True)
             self.n_outputs_d = 2048 
-            self.n_outputs_s = 512 
+            self.n_outputs_s = 1024 
             self.expansion = 4
 
         dict_params = self.network.state_dict()

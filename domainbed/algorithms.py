@@ -88,7 +88,7 @@ class Adapth(Algorithm):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
         pred_s, pred_d, alpha = self.network(all_x)
-        loss_d = self.hparams['deepnet_coef'] * F.cross_entropy(pred_d, all_y)
+        loss_d = F.cross_entropy(pred_d, all_y)
         loss_s = self.hparams['smallnet_coef'] * F.cross_entropy(pred_s, all_y) 
         loss_total = self.hparams['total_coef'] * F.cross_entropy(alpha*pred_s + (1-alpha)*pred_d, all_y)
         self.optimizer.zero_grad()
@@ -97,7 +97,7 @@ class Adapth(Algorithm):
 
         return {
             'loss_s':loss_s.item() * 1/self.hparams['smallnet_coef'],
-            'loss_d':loss_d.item() * 1/self.hparams['deepnet_coef'],
+            'loss_d':loss_d.item(),
             'loss_total':loss_d.item() * 1/self.hparams['total_coef'],
             'alpha': alpha.mean().item()
         }
