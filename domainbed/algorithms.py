@@ -83,22 +83,25 @@ class Adapth(Algorithm):
             lr=self.hparams["lr"],
             weight_decay=self.hparams['weight_decay']
         )
-
+        self.kld = torch.nn.KLDivLoss(reduction='none')
     def update(self, minibatches, unlabeled=None):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
         pred_s, pred_d, alpha = self.network(all_x)
         loss_d = F.cross_entropy(pred_d, all_y)
         loss_s = self.hparams['smallnet_coef'] * F.cross_entropy(pred_s, all_y) 
-        loss_total = self.hparams['total_coef'] * F.cross_entropy(alpha*pred_s + (1-alpha)*pred_d, all_y)
+        loss_total = self.hparams['total_coef'] * F.cross_entropy((1-alpha)*pred_s + (alpha)*pred_d, all_y)
+        #loss_total = F.cross_entropy(alpha*pred_s.detach() + (1-alpha)*pred_d.detach(), all_y)
+        reg = (self.hparams['reg'] * (alpha*self.kld(F.softmax(pred_s,dim=1), F.softmax(pred_d,dim=1)))).mean()
         self.optimizer.zero_grad()
-        (loss_d + loss_s + loss_total).backward()
+        (loss_d + loss_s + loss_total + reg).backward()
         self.optimizer.step()
 
         return {
             'loss_s':loss_s.item() * 1/self.hparams['smallnet_coef'],
             'loss_d':loss_d.item(),
             'loss_total':loss_d.item() * 1/self.hparams['total_coef'],
+            'reg':reg.item() * 1/self.hparams['reg'],
             'alpha': alpha.mean().item()
         }
 

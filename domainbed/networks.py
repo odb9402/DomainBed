@@ -121,7 +121,7 @@ class ResNet(torch.nn.Module):
 
 class ResNetDepth(torch.nn.Module):
     """ResNet with the softmax chopped off and the batchnorm frozen"""
-    def __init__(self, input_shape, hparams):
+    def __init__(self, input_shape, hparams, layer=2):
         super(ResNetDepth, self).__init__()
         if hparams['resnet18']:
             print("RESNET 18 Double output")
@@ -134,8 +134,11 @@ class ResNetDepth(torch.nn.Module):
             print("RESNET 50 Double output")
             self.network = resnet_ds50() 
             imgnet_pretrained = torchvision.models.resnet50(pretrained=True)
-            self.n_outputs_d = 2048 
-            self.n_outputs_s = 1024 
+            self.n_outputs_d = 2048
+            if layer == 3: 
+                self.n_outputs_s = 1024 
+            elif layer == 2:
+                self.n_outputs_s = 512 
             self.expansion = 4
 
         dict_params = self.network.state_dict()
@@ -327,10 +330,10 @@ class AdapthNetwork(nn.Module):
         Returns:
             ([Prediction from the shallow],[Prediction form the deep]): 
         """
-        f_1, f_2, alpha = self.featurizer.forward(x)
-        y_2 = self.classifier_d(f_2)
-        y_1 = self.classifier_s(f_1)
-        return y_1, y_2, alpha
+        f_s, f_d, alpha = self.featurizer.forward(x)
+        y_d = self.classifier_d(f_d)
+        y_s = self.classifier_s(f_s)
+        return y_s, y_d, alpha
 
     def forward_mean(self, x):
         """
@@ -342,9 +345,9 @@ class AdapthNetwork(nn.Module):
         Returns:
             [Prediction]
         """
-        y_1, y_2, alpha = self.forward(x)
+        y_s, y_d, alpha = self.forward(x)
         #c = self.get_coefficient(y_1, y_2)
-        return alpha*y_1 + (1-alpha)*y_2
+        return (1-alpha)*y_s + (alpha)*y_d
 
     def get_coefficient(self, y1, y2):
         prob_1, prob_2 = F.softmax(y1), F.softmax(y2)

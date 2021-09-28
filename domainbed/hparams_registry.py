@@ -98,8 +98,9 @@ def _hparams(algorithm, dataset, random_seed):
         _hparam('k', 1e+1, lambda r: 10**r.uniform(-3, 5))
 
     elif algorithm == 'Adapth':
-        _hparam('smallnet_coef', 0.2, lambda r: r.uniform(0.2, 0.5))
-        _hparam('total_coef', 0.5, lambda r: r.uniform(0.5, 1.0))
+        _hparam('smallnet_coef', 0.5, lambda r: r.uniform(0.2, 1.0))
+        _hparam('total_coef', 0.8, lambda r: r.uniform(0.1, 1.0))
+        _hparam('reg', 1e-4, lambda r: 10**r.uniform(-7, -3))
 
     # Dataset-and-algorithm-specific hparam definitions. Each block of code
     # below corresponds to exactly one hparam. Avoid nested conditionals.

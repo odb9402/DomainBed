@@ -1,0 +1,1 @@
+yes | python -m domainbed.scripts.sweep launch --data_dir=./domainbed/data --algorithms Adapth --dataset $1 --n_hparams 20 --n_trials 3 --output_dir=./$1_reg_total_grad --command_launcher local --single_test_envs
